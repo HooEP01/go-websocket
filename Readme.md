@@ -1,3 +1,9 @@
+
+### Websocket
+1. params: user_id & channel_id
+   
+### Improvement
+
 ```go
 // user modal
 // user.is_online
