@@ -16,18 +16,42 @@ var upgrader = websocket.Upgrader{
 }
 
 type User struct {
-	ID   uint
-	Name string
-	Conn *websocket.Conn
+	ID       uint
+	Name     string
+	Conn     *websocket.Conn
+	IsOnline bool
 }
 
 type Channel struct {
+	ID          string
 	Subscribers map[*websocket.Conn]*User
 }
 
-var chatChannel = &Channel{
-	Subscribers: make(map[*websocket.Conn]*User),
+type ChannelManager struct {
+	Channels map[string]*Channel
 }
+
+func NewChannelManager() *ChannelManager {
+	return &ChannelManager{
+		Channels: make(map[string]*Channel),
+	}
+}
+
+func (manager *ChannelManager) CreateChannel(channelID string) *Channel {
+	channel := &Channel{
+		ID:          channelID,
+		Subscribers: make(map[*websocket.Conn]*User),
+	}
+	manager.Channels[channelID] = channel
+	return channel
+}
+
+func (manager *ChannelManager) GetChannel(channelID string) (*Channel, bool) {
+	channel, exist := manager.Channels[channelID]
+	return channel, exist
+}
+
+var channelManager = NewChannelManager()
 
 type Message struct {
 	UserID   uint   `json:"user_id"`
@@ -43,6 +67,7 @@ func (c *Channel) Broadcast(message Message, excludeSender bool) {
 	}
 
 	for conn, user := range c.Subscribers {
+
 		if excludeSender && user.ID == message.UserID {
 			continue
 		}
@@ -53,6 +78,7 @@ func (c *Channel) Broadcast(message Message, excludeSender bool) {
 			conn.Close()
 			delete(c.Subscribers, conn)
 		}
+
 	}
 }
 
@@ -76,19 +102,26 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	channelID := r.URL.Query().Get("channel_id")
+
 	user := &User{
 		ID:   uint(uID),
-		Name: "user1",
+		Name: "user" + userID,
 		Conn: conn,
 	}
 
-	chatChannel.Subscribers[conn] = user
+	channel, exist := channelManager.GetChannel(channelID)
+	if !exist {
+		channel = channelManager.CreateChannel(channelID)
+	}
+
+	channel.Subscribers[conn] = user
 
 	for {
 		_, messageBytes, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("error: %v", err)
-			delete(chatChannel.Subscribers, conn)
+			delete(channel.Subscribers, conn)
 			break
 		}
 
@@ -98,7 +131,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 			Content:  string(messageBytes),
 		}
 
-		chatChannel.Broadcast(formattedMessage, false)
+		channel.Broadcast(formattedMessage, false)
 	}
 }
 
